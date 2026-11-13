@@ -40,14 +40,22 @@ def build_static(args: argparse.Namespace) -> None:
 
 def download_era5(args: argparse.Namespace) -> None:
     import datetime as dt
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from titikapi.data import era5
 
     last_day = dt.date.today() - dt.timedelta(days=era5.ERA5_LATENCY_DAYS)
-    for year in range(args.start_year, args.end_year + 1):
+
+    def fetch(year: int):
         partial = last_day if year == last_day.year else None
-        inst, tp = era5.download_year(year, last_day=partial)
-        print(f"{year}: {inst.name}, {tp.name}", flush=True)
+        return year, era5.download_year(year, last_day=partial)
+
+    # CDS queues each request; a few in flight at once is much faster than one at a time.
+    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+        futures = [pool.submit(fetch, y) for y in range(args.start_year, args.end_year + 1)]
+        for fut in as_completed(futures):
+            year, (inst, tp) = fut.result()
+            print(f"{year}: {inst.name}, {tp.name}", flush=True)
 
 
 def build_weather(args: argparse.Namespace) -> None:
@@ -68,6 +76,7 @@ def main() -> None:
     p = sub.add_parser("download-era5", help="ERA5 from Copernicus CDS -> data/raw/era5")
     p.add_argument("--start-year", type=int, default=2011)
     p.add_argument("--end-year", type=int, default=dt.date.today().year)
+    p.add_argument("--workers", type=int, default=4)
     p.set_defaults(func=download_era5)
 
     p = sub.add_parser("build-weather", help="ERA5 -> weather features -> data/cube/weather.zarr")
