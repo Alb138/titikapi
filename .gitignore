@@ -1,0 +1,21 @@
+# data and model artifacts live outside git (HF Hub)
+data/
+models/
+*.part
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# secrets
+.env
+.cdsapirc
+
+# web
+web/node_modules/
+web/dist/
+.vercel
