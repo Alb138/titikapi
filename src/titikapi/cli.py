@@ -74,11 +74,51 @@ def build_weather(args: argparse.Namespace) -> None:
     build_weather_cube(years, CUBE_DIR / "weather.zarr")
 
 
+def evaluate_baselines(args: argparse.Namespace) -> None:
+    import pandas as pd
+
+    from titikapi.config import ROOT, SPLITS
+    from titikapi.data.cube import load_fire_matrix, recent_fire
+    from titikapi.models.baselines import Climatology, Persistence
+    from titikapi.models.evaluate import evaluate, issue_days
+
+    fm = load_fire_matrix()
+    rec = recent_fire(fm.on)
+    start, end = (pd.Timestamp(d) for d in SPLITS["train"])
+    train_days = np.flatnonzero((fm.time >= start) & (fm.time <= end))
+    clim = Climatology().fit(fm, train_days)
+    pers = Persistence().fit(fm, rec, issue_days(fm, SPLITS["train"]), climatology=clim)
+
+    out_dir = ROOT / "reports"
+    out_dir.mkdir(exist_ok=True)
+    for split in args.splits:
+        idx = issue_days(fm, SPLITS[split])
+        res = pd.concat(
+            [
+                evaluate("climatology", clim.predict, fm, rec, idx),
+                evaluate("persistence", pers.predict, fm, rec, idx),
+            ]
+        )
+        res.insert(0, "split", split)
+        res.to_csv(out_dir / f"baselines_{split}.csv", index=False)
+        period = f"{fm.time[idx[0]].date()} .. {fm.time[idx[-1]].date()}"
+        print(f"\n== {split}: {len(idx)} issue days, {period}")
+        table = res.pivot_table(
+            index=["slice", "model"], columns="lead", values=["ap", "top5_coverage"]
+        )
+        with pd.option_context("display.width", 160, "display.precision", 3):
+            print(table[[("ap", 1), ("ap", 7), ("top5_coverage", 1), ("top5_coverage", 7)]])
+
+
 def main() -> None:
     import datetime as dt
 
     parser = argparse.ArgumentParser(prog="titikapi")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("evaluate-baselines", help="climatology & persistence -> reports/*.csv")
+    p.add_argument("--splits", nargs="+", default=["val", "test"])
+    p.set_defaults(func=evaluate_baselines)
 
     # 2011 is a spin-up year: the drought code needs months of history to settle.
     p = sub.add_parser("download-era5", help="ERA5 from Copernicus CDS -> data/raw/era5")
