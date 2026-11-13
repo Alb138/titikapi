@@ -56,30 +56,17 @@ def build_static(args: argparse.Namespace) -> None:
 
 def download_era5(args: argparse.Namespace) -> None:
     import datetime as dt
-    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     from titikapi.data import era5
 
     last_day = dt.date.today() - dt.timedelta(days=era5.ERA5_LATENCY_DAYS)
-
-    def fetch(year: int):
-        partial = last_day if year == last_day.year else None
-        return year, era5.download_year(year, last_day=partial)
-
-    # CDS queues each request; a few in flight at once is much faster than one at a time.
-    years = range(args.start_year, args.end_year + 1)
-    failed = []
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures = {pool.submit(fetch, y): y for y in years}
-        for fut in as_completed(futures):
-            try:
-                year, (inst, tp) = fut.result()
-                print(f"{year}: ok ({inst.name}, {tp.name})", flush=True)
-            except Exception as e:
-                failed.append(futures[fut])
-                print(f"{futures[fut]}: FAILED: {e}", flush=True)
+    years = [y for y in range(args.start_year, args.end_year + 1) if y not in args.skip]
+    failed = 0
+    for msg in era5.download_years(years, last_day=last_day, workers=args.workers):
+        print(msg, flush=True)
+        failed += msg.startswith("FAILED")
     if failed:
-        raise SystemExit(f"failed years: {sorted(failed)}; re-run to retry (done files are kept)")
+        raise SystemExit(f"{failed} request(s) failed; re-run to retry (finished files are kept)")
 
 
 def build_weather(args: argparse.Namespace) -> None:
@@ -141,6 +128,7 @@ def main() -> None:
     p.add_argument("--start-year", type=int, default=2011)
     p.add_argument("--end-year", type=int, default=dt.date.today().year)
     p.add_argument("--workers", type=int, default=3, help="CDS allows ~3 queued requests")
+    p.add_argument("--skip", type=int, nargs="*", default=[], help="years to leave out")
     p.set_defaults(func=download_era5)
 
     p = sub.add_parser("build-weather", help="ERA5 -> weather features -> data/cube/weather.zarr")

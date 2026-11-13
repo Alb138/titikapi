@@ -114,3 +114,18 @@ def test_chunked_feature_build_equals_all_at_once():
         history=daily.isel(time=slice(0, 120)).isel(time=slice(-HISTORY_DAYS, None)),
     )
     xr.testing.assert_allclose(xr.concat([a, b], "time"), full, rtol=1e-5)
+
+
+def test_year_chunks_respect_cost_limit_and_gaps():
+    from titikapi.data.era5 import year_chunks
+
+    assert year_chunks([2011, 2012, 2013, 2014, 2015], cost_per_year=52_704, limit=121_000) == [
+        [2011, 2012],
+        [2013, 2014],
+        [2015],
+    ]
+    # a gap (2020-2022 skipped) always starts a new request
+    assert year_chunks([2018, 2019, 2023, 2024], cost_per_year=8_784, limit=121_000) == [
+        [2018, 2019],
+        [2023, 2024],
+    ]
