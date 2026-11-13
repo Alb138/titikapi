@@ -113,11 +113,106 @@ def evaluate_baselines(args: argparse.Namespace) -> None:
             print(table[[("ap", 1), ("ap", 7), ("top5_coverage", 1), ("top5_coverage", 7)]])
 
 
+def build_arrays(args: argparse.Namespace) -> None:
+    from titikapi.models.dataset import ARRAYS_DIR
+    from titikapi.models.dataset import build_arrays as build
+
+    build()
+    print(f"wrote {ARRAYS_DIR}")
+
+
+def _issue_days(split: str):
+    from titikapi.config import SPLITS
+    from titikapi.models.dataset import ARRAYS_DIR, Arrays
+
+    a = Arrays.load(ARRAYS_DIR)
+    start, end = (np.datetime64(d) for d in SPLITS[split])
+    t = np.arange(len(a.time))
+    ok = (a.time.values >= start) & (a.time.values + np.timedelta64(7, "D") <= end) & (t >= 13)
+    return t[ok & (t + 7 < len(a.time))]
+
+
+def train_model(args: argparse.Namespace) -> None:
+    from titikapi.models.train import TrainConfig, train
+
+    cfg = TrainConfig(epochs=args.epochs, batch_size=args.batch_size, base=args.base)
+    train(_issue_days("train"), _issue_days("val"), cfg, name=args.name)
+
+
+def evaluate_model(args: argparse.Namespace) -> None:
+    import json
+
+    import pandas as pd
+    import torch
+
+    from titikapi.config import ROOT
+    from titikapi.data.cube import load_fire_matrix, recent_fire
+    from titikapi.models.dataset import ARRAYS_DIR, Arrays
+    from titikapi.models.evaluate import evaluate
+    from titikapi.models.train import MODELS_DIR, PlattCalibrator, TrainConfig, build_model
+    from titikapi.models.train import predict_logits as predict
+
+    run = MODELS_DIR / args.name
+    cfg = TrainConfig(**json.loads((run / "config.json").read_text()))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    a = Arrays.load(ARRAYS_DIR)
+    model = build_model(a, cfg).to(device)
+    model.load_state_dict(torch.load(run / "best.pt", weights_only=True, map_location=device))
+
+    val_idx = _issue_days("val")
+    val_logits = predict(model, ARRAYS_DIR, val_idx, cfg, device)
+    y_val = np.stack([a.fire_on[val_idx + d] for d in range(1, 8)], axis=1)
+    cal = PlattCalibrator().fit(val_logits, y_val)
+    cal.save(run / "calibration.json")
+
+    fm = load_fire_matrix()
+    rec = recent_fire(fm.on)
+    assert len(fm.time) == len(a.time), "fire cube and arrays are out of sync; rebuild arrays"
+    for split in args.splits:
+        idx = val_idx if split == "val" else _issue_days(split)
+        logits = val_logits if split == "val" else predict(model, ARRAYS_DIR, idx, cfg, device)
+        probs = np.stack([cal.transform(logits[:, d], d + 1) for d in range(7)], axis=1)
+        np.save(run / f"probs_{split}.npy", probs.astype(np.float16))
+        np.save(run / f"idx_{split}.npy", idx)
+
+        def lookup(issue_idx, lead, probs=probs, idx=idx):
+            assert np.array_equal(issue_idx, idx)
+            return probs[:, lead - 1]
+
+        res = evaluate(args.name, lookup, fm, rec, idx)
+        res.insert(0, "split", split)
+        res.to_csv(ROOT / "reports" / f"{args.name}_{split}.csv", index=False)
+        base = pd.read_csv(ROOT / "reports" / f"baselines_{split}.csv")
+        both = pd.concat([base, res])
+        table = both.pivot_table(
+            index=["slice", "model"], columns="lead", values=["ap", "top5_coverage", "brier"]
+        )
+        print(f"\n== {split}")
+        with pd.option_context("display.width", 180, "display.precision", 4):
+            cols = [("ap", 1), ("ap", 7), ("top5_coverage", 1), ("top5_coverage", 7)]
+            print(table[cols + [("brier", 1)]])
+
+
 def main() -> None:
     import datetime as dt
 
     parser = argparse.ArgumentParser(prog="titikapi")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("build-arrays", help="cubes -> memory-mappable model inputs")
+    p.set_defaults(func=build_arrays)
+
+    p = sub.add_parser("train", help="train the U-Net -> models/<name>/best.pt")
+    p.add_argument("--name", default="unet")
+    p.add_argument("--epochs", type=int, default=30)
+    p.add_argument("--batch-size", type=int, default=8)
+    p.add_argument("--base", type=int, default=32)
+    p.set_defaults(func=train_model)
+
+    p = sub.add_parser("evaluate-model", help="calibrate on val, score val/test vs baselines")
+    p.add_argument("--name", default="unet")
+    p.add_argument("--splits", nargs="+", default=["val", "test"])
+    p.set_defaults(func=evaluate_model)
 
     p = sub.add_parser("evaluate-baselines", help="climatology & persistence -> reports/*.csv")
     p.add_argument("--splits", nargs="+", default=["val", "test"])
