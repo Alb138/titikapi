@@ -21,21 +21,37 @@ def build_fire(args: argparse.Namespace) -> None:
 
 
 def build_static(args: argparse.Namespace) -> None:
+    from titikapi.data import enso, land
     from titikapi.data.static import province_raster
 
     grid = Grid()
     prov = province_raster(grid)
+    dims = ("lat", "lon")
     ds = xr.Dataset(
-        {
-            "province_id": (("lat", "lon"), prov),
-            "mask": (("lat", "lon"), prov > 0),
-        },
+        {"province_id": (dims, prov), "mask": (dims, prov > 0)},
         coords=grid.coords(),
         attrs={"province_names": list(PROVINCES)},
     )
+    print(f"study region: {int(ds['mask'].sum()):,} land cells of {np.prod(grid.shape):,}")
+
+    if not args.skip_land:
+        print("peat (PEATMAP) ...", flush=True)
+        ds["peat_frac"] = (dims, land.peat_fraction(grid))
+        print("elevation (Copernicus DEM, remote) ...", flush=True)
+        elev_mean, elev_std = land.elevation_layers(grid)
+        ds["elev_mean"] = (dims, elev_mean)
+        ds["elev_std"] = (dims, elev_std)
+        print("forest (Hansen GFC) ...", flush=True)
+        cover, loss = land.forest_layers(grid)
+        ds["treecover2000"] = (dims, cover)
+        years = np.arange(land.HANSEN_FIRST_LOSS_YEAR, land.HANSEN_FIRST_LOSS_YEAR + len(loss))
+        ds["forest_loss"] = (("loss_year", *dims), loss)
+        ds = ds.assign_coords(loss_year=years)
+
     CUBE_DIR.mkdir(parents=True, exist_ok=True)
     ds.to_zarr(CUBE_DIR / "static.zarr", mode="w", consolidated=False)
-    print(f"study region: {int(ds['mask'].sum()):,} land cells of {np.prod(grid.shape):,}")
+    enso.load_oni().to_csv(CUBE_DIR / "oni.csv")
+    print(f"wrote {CUBE_DIR / 'static.zarr'} with {list(ds.data_vars)}")
 
 
 def download_era5(args: argparse.Namespace) -> None:
@@ -137,7 +153,10 @@ def main() -> None:
     p.add_argument("--end-year", type=int, default=2025)
     p.set_defaults(func=build_fire)
 
-    p = sub.add_parser("build-static", help="province raster + land mask -> data/cube/static.zarr")
+    p = sub.add_parser(
+        "build-static", help="provinces, mask, peat, elevation, forest -> data/cube/static.zarr"
+    )
+    p.add_argument("--skip-land", action="store_true", help="only provinces + mask")
     p.set_defaults(func=build_static)
 
     args = parser.parse_args()
