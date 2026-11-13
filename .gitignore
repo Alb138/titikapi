@@ -1,6 +1,6 @@
 # data and model artifacts live outside git (HF Hub)
-data/
-models/
+/data/
+/models/
 *.part
 
 # python
