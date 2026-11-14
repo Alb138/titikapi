@@ -47,4 +47,6 @@ def reliability(y: np.ndarray, p: np.ndarray, bins: int = 10) -> pd.DataFrame:
     edges = np.unique(np.quantile(p, np.linspace(0, 1, bins + 1)))
     which = np.clip(np.searchsorted(edges, p, side="right") - 1, 0, len(edges) - 2)
     df = pd.DataFrame({"bin": which, "p": p, "y": y})
-    return df.groupby("bin").agg(mean_forecast=("p", "mean"), observed=("y", "mean"), n=("y", "size"))
+    return df.groupby("bin").agg(
+        mean_forecast=("p", "mean"), observed=("y", "mean"), n=("y", "size")
+    )

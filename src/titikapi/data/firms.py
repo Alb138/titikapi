@@ -18,7 +18,9 @@ from tqdm import tqdm
 from titikapi.config import RAW_DIR
 from titikapi.grid import Grid, local_solar_date
 
-COUNTRY_URL = "https://firms.modaps.eosdis.nasa.gov/data/country/{sat}/{year}/{sat}_{year}_{country}.csv"
+COUNTRY_URL = (
+    "https://firms.modaps.eosdis.nasa.gov/data/country/{sat}/{year}/{sat}_{year}_{country}.csv"
+)
 FIRMS_DIR = RAW_DIR / "firms"
 
 # type 0 = presumed vegetation fire; 1 = volcano, 2 = other static land source (e.g. gas flares,
@@ -44,7 +46,10 @@ def download_year(
     with requests.get(url, stream=True, timeout=120) as r:
         r.raise_for_status()
         total = int(r.headers.get("content-length", 0))
-        with open(tmp, "wb") as f, tqdm(total=total, unit="B", unit_scale=True, desc=dest.name) as bar:
+        with (
+            open(tmp, "wb") as f,
+            tqdm(total=total, unit="B", unit_scale=True, desc=dest.name) as bar,
+        ):
             for chunk in r.iter_content(chunk_size=1 << 20):
                 f.write(chunk)
                 bar.update(len(chunk))
@@ -74,9 +79,7 @@ def clean_detections(df: pd.DataFrame, grid: Grid) -> pd.DataFrame:
     df = df.loc[inside]
     row, col = row[inside], col[inside]
 
-    utc = pd.to_datetime(
-        df["acq_date"] + " " + df["acq_time"].str.zfill(4), format="%Y-%m-%d %H%M"
-    )
+    utc = pd.to_datetime(df["acq_date"] + " " + df["acq_time"].str.zfill(4), format="%Y-%m-%d %H%M")
     return pd.DataFrame(
         {
             "lon": df["longitude"].to_numpy(),

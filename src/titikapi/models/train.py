@@ -134,7 +134,13 @@ def train(
         score = float(np.mean(list(scores.values())))
         row = {"epoch": epoch + 1, "train_loss": total / n, **scores, "secs": time.time() - t0}
         log.append(row)
-        print("  " + "  ".join(f"{k} {v:.4f}" if isinstance(v, float) else f"{k} {v}" for k, v in row.items()), flush=True)
+        print(
+            "  "
+            + "  ".join(
+                f"{k} {v:.4f}" if isinstance(v, float) else f"{k} {v}" for k, v in row.items()
+            ),
+            flush=True,
+        )
         if score > best:
             best, best_epoch = score, epoch
             torch.save(model.state_dict(), out_dir / "best.pt")

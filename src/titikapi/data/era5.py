@@ -132,9 +132,11 @@ def _fetch_chunk(kind: str, years: list[int], dest_dir: Path) -> str:
     return f"{kind} {years[0]}-{years[-1]}"
 
 
-def _fetch_partial_year(kind: str, last_day, dest_dir: Path) -> str:
-    """The current year up to `last_day`: complete months, then the current month (2 requests,
-    because days that don't exist yet can't be requested)."""
+def _fetch_partial_year(kind: str, last_day, dest_dir: Path, include_current_month=False) -> str:
+    """The current year's complete months in one request. The current month up to `last_day`
+    needs a second request (days that don't exist yet can't be requested); it is skipped by
+    default because the historical record only has to reach the end of the satellite fire
+    record, and the live pipeline takes recent weather from ECMWF's forecasts instead."""
     import cdsapi
 
     variables, times = KINDS[kind]
@@ -144,10 +146,11 @@ def _fetch_partial_year(kind: str, last_day, dest_dir: Path) -> str:
         req = _request(year, variables, times)
         req["month"] = [f"{m:02d}" for m in range(1, last_day.month)]
         blocks.append(req)
-    req = _request(year, variables, times)
-    req["month"] = [f"{last_day.month:02d}"]
-    req["day"] = [f"{d:02d}" for d in range(1, last_day.day + 1)]
-    blocks.append(req)
+    if include_current_month or not blocks:
+        req = _request(year, variables, times)
+        req["month"] = [f"{last_day.month:02d}"]
+        req["day"] = [f"{d:02d}" for d in range(1, last_day.day + 1)]
+        blocks.append(req)
     client = cdsapi.Client(quiet=True)
     parts = []
     for i, req in enumerate(blocks):
@@ -158,7 +161,7 @@ def _fetch_partial_year(kind: str, last_day, dest_dir: Path) -> str:
     _merge_to(parts, year_path(year, kind, dest_dir))
     for p in parts:
         p.unlink(missing_ok=True)
-    return f"{kind} {year} (to {last_day})"
+    return f"{kind} {year} ({len(blocks)} request(s), complete months to {last_day:%b})"
 
 
 def _datastores_client():
@@ -240,7 +243,9 @@ def download_years(
     for fn, *args in jobs:
         yield "planned: " + fn.__name__.strip("_") + " " + " ".join(map(str, args[:-1]))
     # re-attached jobs only wait, so they get their own threads on top of `workers`
-    with ThreadPoolExecutor(max_workers=workers + len(claimed["inst06"]) + len(claimed["tp"])) as pool:
+    with ThreadPoolExecutor(
+        max_workers=workers + len(claimed["inst06"]) + len(claimed["tp"])
+    ) as pool:
         futures = {pool.submit(fn, *args): (fn.__name__, args[:-1]) for fn, *args in jobs}
         for fut in as_completed(futures):
             name, what = futures[fut]
