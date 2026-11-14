@@ -62,7 +62,9 @@ def download_era5(args: argparse.Namespace) -> None:
     last_day = dt.date.today() - dt.timedelta(days=era5.ERA5_LATENCY_DAYS)
     years = [y for y in range(args.start_year, args.end_year + 1) if y not in args.skip]
     failed = 0
-    for msg in era5.download_years(years, last_day=last_day, workers=args.workers):
+    for msg in era5.download_years(
+        years, last_day=last_day, workers=args.workers, plan_only=args.plan
+    ):
         print(msg, flush=True)
         failed += msg.startswith("FAILED")
     if failed:
@@ -224,6 +226,7 @@ def main() -> None:
     p.add_argument("--end-year", type=int, default=dt.date.today().year)
     p.add_argument("--workers", type=int, default=3, help="CDS allows ~3 queued requests")
     p.add_argument("--skip", type=int, nargs="*", default=[], help="years to leave out")
+    p.add_argument("--plan", action="store_true", help="show the requests, submit nothing")
     p.set_defaults(func=download_era5)
 
     p = sub.add_parser("build-weather", help="ERA5 -> weather features -> data/cube/weather.zarr")

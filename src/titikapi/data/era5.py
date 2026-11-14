@@ -185,19 +185,27 @@ def _kind_of(request: dict) -> str | None:
     return None
 
 
+def _covers_whole_months(req: dict) -> bool:
+    """Full years, or (for a single year) every day of months January..m, as we request them."""
+    months = sorted(req.get("month", []))
+    from_january = months == [f"{m:02d}" for m in range(1, len(months) + 1)]
+    single_year = len(req.get("year", [])) == 1
+    return len(req.get("day", [])) == 31 and (len(months) == 12 or (single_year and from_january))
+
+
 def existing_jobs() -> list[tuple[str, str, list[int]]]:
-    """Our full-year requests already queued, running or finished on CDS, e.g. from a run that
-    was interrupted. Re-attaching keeps their place in the queue instead of starting over."""
+    """Our requests already queued, running or finished on CDS, e.g. from an interrupted run.
+    Re-attaching keeps their place in the queue instead of starting over. Newest first.
+
+    Filtering by status matters: rejected retries can be the newest hundreds of jobs."""
     client = _datastores_client()
     found = []
-    for job in client.get_jobs(limit=100).json.get("jobs", []):
-        if job.get("status") not in ("accepted", "running", "successful"):
-            continue
+    active = ["accepted", "running", "successful"]
+    for job in client.get_jobs(limit=100, status=active, sortby="-created").json.get("jobs", []):
         req = client.get_remote(job["jobID"]).request
         kind = _kind_of(req)
-        full_years = len(req.get("month", [])) == 12 and len(req.get("day", [])) == 31
         same_area = [float(x) for x in req.get("area", [])] == AREA
-        if kind and full_years and same_area:
+        if kind and same_area and _covers_whole_months(req):
             found.append((job["jobID"], kind, sorted(int(y) for y in req["year"])))
     return found
 
@@ -213,13 +221,18 @@ def _attach(job_id: str, kind: str, years: list[int], dest_dir: Path) -> str:
 
 
 def download_years(
-    years: list[int], last_day=None, dest_dir: Path = ERA5_DIR, workers: int = MAX_IN_FLIGHT
+    years: list[int],
+    last_day=None,
+    dest_dir: Path = ERA5_DIR,
+    workers: int = MAX_IN_FLIGHT,
+    plan_only: bool = False,
 ):
     """Download every missing (year, kind) file using as few CDS requests as possible.
 
     Full years are batched under the cost limit (13 years of 06 UTC fields, or 2 years of hourly
-    precipitation, per request); the current year (if `last_day` is in it) is fetched up to
-    `last_day`. Yields a message as each request finishes.
+    precipitation, per request); for the current year (if `last_day` is in it) its complete
+    months are fetched. Yields a "planned: ..." line per job, then (unless `plan_only`, which
+    submits nothing) a message as each job finishes.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -242,6 +255,8 @@ def download_years(
             jobs.append((_fetch_partial_year, kind, last_day, dest_dir))
     for fn, *args in jobs:
         yield "planned: " + fn.__name__.strip("_") + " " + " ".join(map(str, args[:-1]))
+    if plan_only:
+        return
     # re-attached jobs only wait, so they get their own threads on top of `workers`
     with ThreadPoolExecutor(
         max_workers=workers + len(claimed["inst06"]) + len(claimed["tp"])
