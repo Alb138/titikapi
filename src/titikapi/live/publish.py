@@ -140,7 +140,10 @@ def save_archive(probs: dict, path: Path) -> None:
 def score_archive(archive: Path, fire: FireState, scores_csv: Path) -> pd.DataFrame:
     """Score every (forecast, lead) whose target day is now observed and not yet scored.
     One row per issue date x lead: AP and top-5% coverage for the model and persistence."""
-    old = pd.read_csv(scores_csv) if scores_csv.exists() else pd.DataFrame()
+    try:
+        old = pd.read_csv(scores_csv)
+    except (FileNotFoundError, pd.errors.EmptyDataError):  # first runs: nothing scored yet
+        old = pd.DataFrame()
     done = set(zip(old.get("issue_date", []), old.get("lead", []), strict=False))
     pos = {d: i for i, d in enumerate(fire.dates.strftime("%Y-%m-%d"))}
     rows = []

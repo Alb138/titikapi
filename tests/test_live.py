@@ -75,3 +75,12 @@ def test_scored_rows_carry_calibration_bins(tmp_path):
     card = scorecard(s, pd.Timestamp("2026-09-30"))
     bins = card["calibration_since_launch"]["lead1"]
     assert sum(b["cells"] for b in bins) == 50
+
+
+def test_score_archive_accepts_an_empty_scores_file(tmp_path):
+    fire = _fire(20)
+    (tmp_path / "forecasts").mkdir()
+    csv = tmp_path / "scores.csv"
+    csv.write_text("
+")  # what an empty DataFrame's to_csv leaves behind
+    assert score_archive(tmp_path / "forecasts", fire, csv).empty
