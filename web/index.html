@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TitikApi: 7-day fire risk for Sumatra and Kalimantan</title>
+    <meta
+      name="description"
+      content="Daily forecast of where fires are likely in Sumatra and Kalimantan over the next 7 days, graded against satellite fire detections."
+    />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="#top" aria-label="TitikApi home">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.5" />
+          <circle cx="12" cy="12" r="9" />
+        </svg>
+        <span class="brand-name">TitikApi</span>
+      </a>
+      <p class="tagline">7-day fire risk for Sumatra and Kalimantan</p>
+      <nav class="site-nav" aria-label="Sections">
+        <a href="#accuracy">How accurate is it?</a>
+        <a href="#about">About</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="forecast" aria-label="Forecast map">
+        <div id="map" class="map" role="region" aria-label="Map of fire risk"></div>
+
+        <aside class="panel" aria-live="polite">
+          <p class="panel-status" id="status">Loading today's forecast…</p>
+          <h1 class="day-title" id="day-title"></h1>
+          <p class="day-sub" id="day-sub"></p>
+          <p class="expected" id="expected"></p>
+
+          <div class="legend" aria-label="Colour key">
+            <p class="legend-title">Chance of a fire in each 11 km cell</p>
+            <div class="legend-ramp" aria-hidden="true"></div>
+            <div class="legend-ticks" aria-hidden="true">
+              <span style="left: 0%">0.1%</span>
+              <span style="left: 34.4%">1%</span>
+              <span style="left: 68.9%">10%</span>
+              <span style="left: 100%">80%</span>
+            </div>
+          </div>
+
+          <label class="toggle">
+            <input type="checkbox" id="show-fires" checked />
+            <span class="fire-dot" aria-hidden="true"></span>
+            Fires detected in the last 3 days
+          </label>
+
+          <h2 class="provinces-title">Expected fire cells by province</h2>
+          <ol class="provinces" id="provinces"></ol>
+          <button class="link-button" id="more-provinces" type="button" hidden>
+            Show all 15 provinces
+          </button>
+        </aside>
+
+        <div class="day-strip" role="group" aria-label="Choose the forecast day" id="day-strip"></div>
+      </section>
+
+      <section class="accuracy" id="accuracy" aria-labelledby="accuracy-title">
+        <div class="prose">
+          <h2 id="accuracy-title">How accurate is it?</h2>
+          <p>
+            A probability can't be judged on one day: a 30% chance that doesn't burn wasn't wrong.
+            Accuracy shows over many forecasts, measured three ways: are the riskiest cells really
+            where fires happen, do the percentages match how often fires follow, and is it better
+            than the obvious alternative of assuming today's fires continue.
+          </p>
+        </div>
+
+        <div class="accuracy-grid">
+          <div class="accuracy-block">
+            <h3>Tested before launch</h3>
+            <p class="measure-note">
+              January 2023 to October 2026, years the model never saw while it was trained or
+              tuned. Share of next-day fires that fell in the 5% of cells the forecast ranked
+              riskiest:
+            </p>
+            <dl class="compare" id="tested"></dl>
+            <p class="measure-note">
+              Replaying the 2026 El Niño season with exactly the data the live system uses gave the
+              same result.
+            </p>
+          </div>
+
+          <div class="accuracy-block">
+            <h3>Graded live, every day</h3>
+            <div id="live-score"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="about" id="about" aria-labelledby="about-title">
+        <div class="prose">
+          <h2 id="about-title">About</h2>
+          <p>
+            <em>Titik api</em> is Indonesian for hotspot. Every evening at 19:00 WIB, TitikApi takes
+            the fires seen by NASA's NOAA-20 satellite and the latest ECMWF weather, and forecasts
+            the chance of a fire in every 11 km cell of Sumatra and Kalimantan for each of the next
+            7 days. The forecast combines a deep-learning model (a U-Net, which reads the whole map
+            at once) with a gradient-boosted model, both trained on fires from 2012 to 2020.
+          </p>
+          <p>
+            Recent fires and each place's usual fire season carry most of the forecast. A week
+            ahead, the deep-learning model leans on how long it has been since rain, which is why it
+            holds up better than simpler models at longer range.
+          </p>
+          <p>
+            <strong>This is a portfolio project, not an official warning.</strong> For official
+            hotspot information, see
+            <a href="https://sipongi.menlhk.go.id/" rel="noopener">SiPongi</a>, Indonesia's
+            national forest and land fire monitoring system, and
+            <a href="https://www.bmkg.go.id/" rel="noopener">BMKG</a>.
+          </p>
+          <p class="links">
+            <a href="https://github.com/Alb138/titikapi" rel="noopener">Code and write-up on GitHub</a>
+            <a href="https://huggingface.co/datasets/Alb138/titikapi-live" rel="noopener"
+              >Daily forecasts and scores on Hugging Face</a
+            >
+          </p>
+          <p class="credits">
+            Fire detections: NASA FIRMS (VIIRS NOAA-20). Weather: ECMWF open data, CC BY 4.0; ERA5,
+            Copernicus Climate Change Service. Land: PEATMAP, Hansen Global Forest Change, Copernicus
+            DEM, geoBoundaries. Base map: OpenFreeMap, OpenMapTiles, OpenStreetMap contributors.
+          </p>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
