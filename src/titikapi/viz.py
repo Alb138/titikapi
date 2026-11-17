@@ -93,3 +93,26 @@ def map_extent(grid) -> list[float]:
 
 def masked(values: np.ndarray, mask: np.ndarray) -> np.ma.MaskedArray:
     return np.ma.masked_where(~mask, values)
+
+
+def label_ends(ax: plt.Axes, x: float, items: list[tuple[float, str]], min_gap: float) -> None:
+    """Direct labels at the right end of lines, nudged apart so none overlap.
+
+    `items` are (y, text); `min_gap` is the smallest vertical distance in data units."""
+    order = sorted(range(len(items)), key=lambda i: items[i][0])
+    placed: list[float] = []
+    for i in order:
+        y = items[i][0] if not placed else max(items[i][0], placed[-1] + min_gap)
+        placed.append(y)
+        ax.annotate(
+            items[i][1],
+            xy=(x, items[i][0]),
+            xytext=(x, y),
+            textcoords="data",
+            xycoords="data",
+            ha="left",
+            va="center",
+            fontsize=9,
+            color=INK_2,
+            annotation_clip=False,
+        )
