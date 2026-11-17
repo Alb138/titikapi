@@ -13,12 +13,23 @@ concurrency:
   group: daily-forecast
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: write # keep-alive below
+
 jobs:
   forecast:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: Keep the schedule alive
+        # GitHub pauses scheduled workflows after 60 days without repository activity; this job
+        # only writes to Hugging Face, so re-confirm the schedule through the API on every run.
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/daily.yml/enable"
       - name: ecCodes (reads ECMWF GRIB files; bundled in the Windows wheel, not on Linux)
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libeccodes-dev
       - uses: astral-sh/setup-uv@v6
