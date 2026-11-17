@@ -71,11 +71,21 @@ class FireUNet(nn.Module):
             cin = w
         self.head = nn.Conv2d(widths[0], out_channels, 1)
 
-    def forward(self, grid: torch.Tensor, weather: torch.Tensor) -> torch.Tensor:
-        b, _, h, w = grid.shape
+    def forward(
+        self,
+        grid: torch.Tensor,
+        weather: torch.Tensor,
+        crop: tuple[int, int, int, int] | None = None,
+    ) -> torch.Tensor:
+        """`crop` = (row0, col0, height, width): train on a window of the region (augmentation)."""
+        b = grid.shape[0]
         sg = self.sampling_grid.expand(b, -1, -1, -1).to(weather.dtype)
         wx = F.grid_sample(weather, sg, mode="bilinear", align_corners=True)
         x = torch.cat([grid, wx], dim=1)
+        if crop is not None:
+            r0, c0, ch, cw = crop
+            x = x[..., r0 : r0 + ch, c0 : c0 + cw]
+        h, w = x.shape[-2:]
 
         mult = 2**self.depth  # pad so every pooling level divides evenly
         ph, pw = (-h) % mult, (-w) % mult

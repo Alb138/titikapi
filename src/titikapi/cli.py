@@ -16,7 +16,9 @@ def build_fire(args: argparse.Namespace) -> None:
 
     CUBE_DIR.mkdir(parents=True, exist_ok=True)
     years = range(args.start_year, args.end_year + 1)
-    out = build_fire_cube(years, CUBE_DIR / "fire.zarr", Grid(), first_day=FIRST_DAY)
+    out = build_fire_cube(
+        years, CUBE_DIR / "fire.zarr", Grid(), first_day=FIRST_DAY, last_day=args.last_day
+    )
     print(f"wrote {out}")
 
 
@@ -137,21 +139,26 @@ def _issue_days(split: str):
 def train_model(args: argparse.Namespace) -> None:
     from titikapi.models.train import TrainConfig, train
 
-    cfg = TrainConfig(epochs=args.epochs, batch_size=args.batch_size, base=args.base)
+    cfg = TrainConfig(
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        base=args.base,
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        dropout=args.dropout,
+        patience=args.patience,
+        crop=args.crop,
+    )
     train(_issue_days("train"), _issue_days("val"), cfg, name=args.name)
 
 
 def evaluate_model(args: argparse.Namespace) -> None:
     import json
 
-    import pandas as pd
     import torch
 
-    from titikapi.config import ROOT
-    from titikapi.data.cube import load_fire_matrix, recent_fire
     from titikapi.models.dataset import ARRAYS_DIR, Arrays
-    from titikapi.models.evaluate import evaluate
-    from titikapi.models.train import MODELS_DIR, PlattCalibrator, TrainConfig, build_model
+    from titikapi.models.train import MODELS_DIR, TrainConfig, build_model
     from titikapi.models.train import predict_logits as predict
 
     run = MODELS_DIR / args.name
@@ -160,9 +167,74 @@ def evaluate_model(args: argparse.Namespace) -> None:
     a = Arrays.load(ARRAYS_DIR)
     model = build_model(a, cfg).to(device)
     model.load_state_dict(torch.load(run / "best.pt", weights_only=True, map_location=device))
+    _calibrate_and_report(
+        args.name, a, args.splits, lambda idx: predict(model, ARRAYS_DIR, idx, cfg, device)
+    )
 
+
+def train_lgbm(args: argparse.Namespace) -> None:
+    import pandas as pd
+
+    from titikapi.config import ROOT
+    from titikapi.models import lgbm
+    from titikapi.models.dataset import ARRAYS_DIR, Arrays
+    from titikapi.models.train import MODELS_DIR
+
+    a = Arrays.load(ARRAYS_DIR)
+    fb = lgbm.FeatureBuilder(a)
+    boosters = lgbm.fit(fb, _issue_days("train"), _issue_days("val"), neg_frac=args.neg_frac)
+    run = MODELS_DIR / args.name
+    run.mkdir(parents=True, exist_ok=True)
+    for d, b in enumerate(boosters, start=1):
+        b.save_model(str(run / f"lead{d}.txt"), num_iteration=b.best_iteration)
+    gain = {f"lead{d}": b.feature_importance("gain") for d, b in enumerate(boosters, start=1)}
+    imp = pd.DataFrame(gain, index=lgbm.FEATURES)
+    imp.div(imp.sum()).sort_values("lead1", ascending=False).to_csv(
+        ROOT / "reports" / f"{args.name}_importance.csv"
+    )
+    _calibrate_and_report(
+        args.name, a, args.splits, lambda idx: lgbm.predict_raw(boosters, fb, idx)
+    )
+
+
+def evaluate_ensemble(args: argparse.Namespace) -> None:
+    """Average the members' calibrated probabilities, then recalibrate and score like a model."""
+    from titikapi.models.dataset import ARRAYS_DIR, Arrays
+    from titikapi.models.train import MODELS_DIR
+
+    days = {s: _issue_days(s) for s in ("val", *args.splits)}
+
+    def predict(idx):
+        split = next(s for s, d in days.items() if np.array_equal(d, idx))
+        total = None
+        for m in args.members:
+            run = MODELS_DIR / m
+            assert np.array_equal(np.load(run / f"idx_{split}.npy"), idx), (
+                f"{m}: saved {split} predictions are for different days; re-run its evaluation"
+            )
+            p = np.load(run / f"probs_{split}.npy").astype(np.float32)
+            total = p if total is None else total + p
+        p = np.clip(total / len(args.members), 1e-6, 1 - 1e-6)
+        return np.log(p / (1 - p))
+
+    (MODELS_DIR / args.name).mkdir(parents=True, exist_ok=True)
+    (MODELS_DIR / args.name / "members.txt").write_text("\n".join(args.members))
+    _calibrate_and_report(args.name, Arrays.load(ARRAYS_DIR), args.splits, predict)
+
+
+def _calibrate_and_report(name: str, a, splits, predict) -> None:
+    """Fit per-lead Platt scaling on validation logits, then score each split against the
+    baselines. Saves probs/idx to models/<name>/ and reports/<name>_<split>.csv."""
+    import pandas as pd
+
+    from titikapi.config import ROOT
+    from titikapi.data.cube import load_fire_matrix, recent_fire
+    from titikapi.models.evaluate import evaluate
+    from titikapi.models.train import MODELS_DIR, PlattCalibrator
+
+    run = MODELS_DIR / name
     val_idx = _issue_days("val")
-    val_logits = predict(model, ARRAYS_DIR, val_idx, cfg, device)
+    val_logits = predict(val_idx)
     y_val = np.stack([a.fire_on[val_idx + d] for d in range(1, 8)], axis=1)
     cal = PlattCalibrator().fit(val_logits, y_val)
     cal.save(run / "calibration.json")
@@ -170,9 +242,9 @@ def evaluate_model(args: argparse.Namespace) -> None:
     fm = load_fire_matrix()
     rec = recent_fire(fm.on)
     assert len(fm.time) == len(a.time), "fire cube and arrays are out of sync; rebuild arrays"
-    for split in args.splits:
+    for split in splits:
         idx = val_idx if split == "val" else _issue_days(split)
-        logits = val_logits if split == "val" else predict(model, ARRAYS_DIR, idx, cfg, device)
+        logits = val_logits if split == "val" else predict(idx)
         probs = np.stack([cal.transform(logits[:, d], d + 1) for d in range(7)], axis=1)
         np.save(run / f"probs_{split}.npy", probs.astype(np.float16))
         np.save(run / f"idx_{split}.npy", idx)
@@ -181,9 +253,9 @@ def evaluate_model(args: argparse.Namespace) -> None:
             assert np.array_equal(issue_idx, idx)
             return probs[:, lead - 1]
 
-        res = evaluate(args.name, lookup, fm, rec, idx)
+        res = evaluate(name, lookup, fm, rec, idx)
         res.insert(0, "split", split)
-        res.to_csv(ROOT / "reports" / f"{args.name}_{split}.csv", index=False)
+        res.to_csv(ROOT / "reports" / f"{name}_{split}.csv", index=False)
         base = pd.read_csv(ROOT / "reports" / f"baselines_{split}.csv")
         both = pd.concat([base, res])
         table = both.pivot_table(
@@ -209,12 +281,29 @@ def main() -> None:
     p.add_argument("--epochs", type=int, default=30)
     p.add_argument("--batch-size", type=int, default=8)
     p.add_argument("--base", type=int, default=32)
+    p.add_argument("--lr", type=float, default=1e-3)
+    p.add_argument("--weight-decay", type=float, default=1e-4)
+    p.add_argument("--dropout", type=float, default=0.1)
+    p.add_argument("--patience", type=int, default=6)
+    p.add_argument("--crop", type=int, default=0, help="train on random crop x crop windows")
     p.set_defaults(func=train_model)
 
     p = sub.add_parser("evaluate-model", help="calibrate on val, score val/test vs baselines")
     p.add_argument("--name", default="unet")
     p.add_argument("--splits", nargs="+", default=["val", "test"])
     p.set_defaults(func=evaluate_model)
+
+    p = sub.add_parser("evaluate-ensemble", help="average saved model probabilities and score")
+    p.add_argument("--name", required=True)
+    p.add_argument("--members", nargs="+", required=True, help="model names under models/")
+    p.add_argument("--splits", nargs="+", default=["val", "test"])
+    p.set_defaults(func=evaluate_ensemble)
+
+    p = sub.add_parser("train-lgbm", help="LightGBM baseline: fit, calibrate, score")
+    p.add_argument("--name", default="lgbm")
+    p.add_argument("--neg-frac", type=float, default=0.04, help="share of non-fire rows kept")
+    p.add_argument("--splits", nargs="+", default=["val", "test"])
+    p.set_defaults(func=train_lgbm)
 
     p = sub.add_parser("evaluate-baselines", help="climatology & persistence -> reports/*.csv")
     p.add_argument("--splits", nargs="+", default=["val", "test"])
@@ -237,6 +326,7 @@ def main() -> None:
     p = sub.add_parser("build-fire", help="FIRMS archives -> data/cube/fire.zarr")
     p.add_argument("--start-year", type=int, default=FIRST_DAY.year)
     p.add_argument("--end-year", type=int, default=2025)
+    p.add_argument("--last-day", help="YYYY-MM-DD: stop here (e.g. where ERA5 ends)")
     p.set_defaults(func=build_fire)
 
     p = sub.add_parser(

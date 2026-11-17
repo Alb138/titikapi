@@ -99,3 +99,14 @@ def test_unet_output_shape_on_odd_grid():
     x = torch.from_numpy(grid_inputs(a, 30))[None]
     w = torch.from_numpy(np.asarray(a.weather[30], np.float32))[None]
     assert model(x, w).shape == (1, 7, 13, 21)
+
+
+def test_unet_crop_returns_window_logits():
+    import torch
+
+    from titikapi.models.unet import FireUNet
+
+    sg = torch.zeros(1, 37, 53, 2)
+    model = FireUNet(5, 3, sg, base=8, depth=2)
+    out = model(torch.randn(2, 5, 37, 53), torch.randn(2, 3, 9, 11), crop=(3, 7, 20, 30))
+    assert out.shape == (2, 7, 20, 30)

@@ -57,3 +57,21 @@ def test_daily_grids_ignores_detections_outside_date_range(raw):
     det = clean_detections(raw, grid)
     ds = daily_fire_grids(det, "2019-09-16", "2019-09-17", grid)
     assert int(ds["fire_count"].sum()) == 0
+
+
+def test_drop_static_sources_removes_only_flagged_locations():
+    import numpy as np
+    import pandas as pd
+
+    from titikapi.data.firms import drop_static_sources, static_source_points
+
+    sp = pd.DataFrame(
+        {"longitude": [101.0, 102.0, 103.0], "latitude": [1.0, 0.5, -1.0], "type": [2, 0, 1]}
+    )
+    pts = static_source_points([sp])
+    assert np.allclose(sorted(pts[:, 0]), [101.0, 103.0])
+    nrt = pd.DataFrame(
+        {"longitude": [101.002, 101.02, 102.0, 103.0], "latitude": [1.001, 1.0, 0.5, -1.0]}
+    )
+    kept = drop_static_sources(nrt, pts)
+    assert kept["longitude"].tolist() == [101.02, 102.0]  # 2 km away and a vegetation fire stay

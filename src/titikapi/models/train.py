@@ -35,6 +35,7 @@ class TrainConfig:
     workers: int = 2
     amp: bool = True
     seed: int = 0
+    crop: int = 0  # >0: train on random crop x crop windows (augmentation); 0 = whole region
 
 
 def build_model(a: Arrays, cfg: TrainConfig) -> FireUNet:
@@ -110,14 +111,22 @@ def train(
     log = []
     best, best_epoch = -np.inf, -1
     print(f"{name}: {n_params / 1e6:.2f}M parameters, {len(train_idx)} train days, {device}")
+    rng = np.random.default_rng(cfg.seed)
     for epoch in range(cfg.epochs):
         model.train()
         t0, total, n = time.time(), 0.0, 0
         for x, w, y, _, _ in loader:
             x, w, y = (v.to(device, non_blocking=True) for v in (x, w, y))
             land = x[:, -1] > 0.5  # last grid channel is the land mask
+            crop = None
+            if cfg.crop:
+                (ny, nx), c = land.shape[-2:], cfg.crop
+                ch, cw = min(c, ny), min(c, nx)
+                crop = (int(rng.integers(ny - ch + 1)), int(rng.integers(nx - cw + 1)), ch, cw)
+                y = y[..., crop[0] : crop[0] + ch, crop[1] : crop[1] + cw]
+                land = land[..., crop[0] : crop[0] + ch, crop[1] : crop[1] + cw]
             with torch.autocast(device.type, enabled=cfg.amp and device.type == "cuda"):
-                logits = model(x, w)
+                logits = model(x, w, crop)
             loss = masked_bce(logits.float(), y, land, cfg.pos_weight)
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
