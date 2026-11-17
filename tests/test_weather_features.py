@@ -129,3 +129,22 @@ def test_year_chunks_respect_cost_limit_and_gaps():
         [2018, 2019],
         [2023, 2024],
     ]
+
+
+def test_plan_reuse_keeps_at_most_limit_queued_and_deletes_the_rest():
+    from titikapi.data.era5 import plan_reuse
+
+    found = [  # newest first
+        ("new_tp", "accepted", "tp", [2019, 2020]),
+        ("done", "successful", "inst06", [2024, 2025]),
+        ("dup", "accepted", "tp", [2013, 2014]),
+        ("mid", "accepted", "tp", [2013, 2014]),
+        ("have", "accepted", "tp", [2011, 2012]),  # already downloaded
+        ("old_inst", "accepted", "inst06", [2026]),
+        ("run", "running", "tp", [2015, 2016]),
+    ]
+    missing = {"inst06": {2024, 2025, 2026}, "tp": set(range(2013, 2021))}
+    claim, surplus = plan_reuse(found, missing, limit=3)
+    assert [c[0] for c in claim] == ["done", "run", "old_inst", "mid"]
+    assert sum(c[3] for c in claim) == 3  # queued slots used
+    assert sorted(surplus) == ["dup", "have", "new_tp"]

@@ -193,9 +193,9 @@ def _covers_whole_months(req: dict) -> bool:
     return len(req.get("day", [])) == 31 and (len(months) == 12 or (single_year and from_january))
 
 
-def existing_jobs() -> list[tuple[str, str, list[int]]]:
-    """Our requests already queued, running or finished on CDS, e.g. from an interrupted run.
-    Re-attaching keeps their place in the queue instead of starting over. Newest first.
+def existing_jobs() -> list[tuple[str, str, str, list[int]]]:
+    """Our requests already queued, running or finished on CDS, e.g. from an interrupted run,
+    as (job_id, status, kind, years). Newest first.
 
     Filtering by status matters: rejected retries can be the newest hundreds of jobs."""
     client = _datastores_client()
@@ -206,15 +206,51 @@ def existing_jobs() -> list[tuple[str, str, list[int]]]:
         kind = _kind_of(req)
         same_area = [float(x) for x in req.get("area", [])] == AREA
         if kind and same_area and _covers_whole_months(req):
-            found.append((job["jobID"], kind, sorted(int(y) for y in req["year"])))
+            years = sorted(int(y) for y in req["year"])
+            found.append((job["jobID"], job["status"], kind, years))
     return found
+
+
+def plan_reuse(found, missing: dict[str, set[int]], limit: int = MAX_IN_FLIGHT):
+    """Split our existing CDS jobs (newest first) into ones to re-attach to and surplus queued
+    ones to delete.
+
+    Finished jobs are always reused if they hold only missing years. Queued jobs are reused up to
+    `limit`, running ones first, then the oldest accepted (nearest the front of the queue). CDS
+    rejects jobs (old ones included) while more than `limit` are queued, so any other accepted
+    job is surplus. Returns ([(job_id, kind, years, queued)], [surplus job_id]).
+    """
+    rank = {"successful": 0, "running": 1, "accepted": 2}
+    order = sorted(
+        range(len(found)), key=lambda i: (rank[found[i][1]], -i if found[i][1] == "accepted" else i)
+    )
+    claim, surplus, taken, queued = [], [], {k: set() for k in missing}, 0
+    for i in order:
+        job_id, status, kind, years = found[i]
+        usable = set(years) <= missing[kind] and not taken[kind] & set(years)
+        is_queued = status != "successful"
+        if usable and (not is_queued or queued < limit):
+            claim.append((job_id, kind, years, is_queued))
+            taken[kind] |= set(years)
+            queued += is_queued
+        elif status == "accepted":
+            surplus.append(job_id)
+    return claim, surplus
 
 
 def _attach(job_id: str, kind: str, years: list[int], dest_dir: Path) -> str:
     chunk = dest_dir / f"era5_{years[0]}-{years[-1]}_{kind}.chunk.nc"
     tmp = chunk.with_name(chunk.name + ".part")
-    _datastores_client().get_remote(job_id).download(str(tmp))  # waits for the job to finish
-    tmp.replace(chunk)
+    remote = _datastores_client().get_remote(job_id)
+    try:
+        remote.download(str(tmp))  # waits for the job to finish
+        tmp.replace(chunk)
+    except Exception as e:
+        if "Maximum number queued requests" not in str(e):
+            raise
+        import cdsapi  # rejected while the queue was over-full: ask again, same request
+
+        _retrieve(cdsapi.Client(quiet=True), remote.request, chunk)
     _split_years(chunk, kind, years, dest_dir)
     chunk.unlink(missing_ok=True)
     return f"{kind} {years[0]}-{years[-1]} (re-attached to an earlier request)"
@@ -237,30 +273,30 @@ def download_years(
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     dest_dir.mkdir(parents=True, exist_ok=True)
-    jobs = []
-    claimed = {kind: set() for kind in KINDS}
-    for job_id, kind, job_years in existing_jobs():
-        wanted = [y for y in job_years if y in years and not year_path(y, kind, dest_dir).exists()]
-        if wanted == job_years and not claimed[kind] & set(job_years):
-            jobs.append((_attach, job_id, kind, job_years, dest_dir))
-            claimed[kind] |= set(job_years)
+    missing = {k: {y for y in years if not year_path(y, k, dest_dir).exists()} for k in KINDS}
+    claim, surplus = plan_reuse(existing_jobs(), missing)
+    jobs = [(_attach, job_id, kind, job_years, dest_dir) for job_id, kind, job_years, _ in claim]
+    for _id, kind, job_years, _q in claim:
+        missing[kind] -= set(job_years)
     for kind, (variables, times) in KINDS.items():
-        missing = [
-            y for y in years if not year_path(y, kind, dest_dir).exists() and y not in claimed[kind]
-        ]
-        full = [y for y in missing if last_day is None or y < last_day.year]
+        todo = sorted(missing[kind])
+        full = [y for y in todo if last_day is None or y < last_day.year]
         cost = len(variables) * len(times) * 366 * 6
         jobs += [(_fetch_chunk, kind, chunk, dest_dir) for chunk in year_chunks(full, cost)]
-        if last_day is not None and last_day.year in missing:
+        if last_day is not None and last_day.year in todo:
             jobs.append((_fetch_partial_year, kind, last_day, dest_dir))
+    for job_id in surplus:
+        yield f"planned: delete surplus queued request {job_id}"
     for fn, *args in jobs:
         yield "planned: " + fn.__name__.strip("_") + " " + " ".join(map(str, args[:-1]))
     if plan_only:
         return
-    # re-attached jobs only wait, so they get their own threads on top of `workers`
-    with ThreadPoolExecutor(
-        max_workers=workers + len(claimed["inst06"]) + len(claimed["tp"])
-    ) as pool:
+    client = _datastores_client() if surplus else None
+    for job_id in surplus:
+        client.get_remote(job_id).delete()
+    # One thread per CDS queue slot: re-attached jobs come first and hold their slot until they
+    # finish, so at most MAX_IN_FLIGHT of our requests are ever queued at once.
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, MAX_IN_FLIGHT))) as pool:
         futures = {pool.submit(fn, *args): (fn.__name__, args[:-1]) for fn, *args in jobs}
         for fut in as_completed(futures):
             name, what = futures[fut]
