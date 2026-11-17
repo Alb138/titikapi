@@ -19,6 +19,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - name: ecCodes (reads ECMWF GRIB files; bundled in the Windows wheel, not on Linux)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libeccodes-dev
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
