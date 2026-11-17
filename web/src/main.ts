@@ -134,7 +134,7 @@ function renderDay(f: Forecast, lead: number) {
   const L = f.leads[lead - 1];
   $("day-title").textContent = dayLong(L.date);
   $("day-sub").textContent =
-    `${lead === 1 ? "Tomorrow" : `${lead} days ahead`}. Forecast made ${dayLong(f.issue_date)} ` +
+    `Day ${lead} of 7. Forecast made ${dayLong(f.issue_date)} ` +
     `from fires and weather up to that day.`;
   $("expected").innerHTML =
     `About <strong>${fmtCells(L.expected_fire_cells)}</strong> of the region's 9,275 land cells ` +

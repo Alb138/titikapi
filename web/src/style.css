@@ -105,6 +105,10 @@ a:hover {
   text-decoration: none;
 }
 
+.nav-short {
+  display: none;
+}
+
 /* ------------------------------------------------------------ map + panel */
 
 .forecast {
@@ -146,7 +150,7 @@ a:hover {
 
 .day-title {
   margin: 4px 0 2px;
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   line-height: 1.15;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -283,6 +287,12 @@ a:hover {
   cursor: pointer;
 }
 
+/* keep the map's credits visible above the day strip */
+.forecast .maplibregl-ctrl-bottom-right,
+.forecast .maplibregl-ctrl-bottom-left {
+  bottom: calc(var(--strip-h) + 20px);
+}
+
 /* ------------------------------------------------------------ day strip */
 
 .day-strip {
@@ -292,7 +302,7 @@ a:hover {
   bottom: 16px;
   height: var(--strip-h);
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 2px;
   padding: 10px 10px 8px;
   background: rgb(247 248 247 / 0.95);
@@ -322,6 +332,8 @@ a:hover {
 }
 
 .day .col {
+  align-self: flex-start;
+  width: 26px;
   height: var(--h);
   min-height: 3px;
   border-radius: 3px 3px 0 0;
@@ -467,6 +479,18 @@ a:hover {
     font-size: 0.875rem;
   }
 
+  .nav-long {
+    display: none;
+  }
+
+  .nav-short {
+    display: inline;
+  }
+
+  .day .count {
+    font-size: 0.6875rem;
+  }
+
   .forecast {
     height: auto;
     min-height: 0;
@@ -499,6 +523,15 @@ a:hover {
 
   .day {
     padding: 0 2px;
+  }
+
+  .day .col {
+    width: 18px;
+  }
+
+  .forecast .maplibregl-ctrl-bottom-right,
+  .forecast .maplibregl-ctrl-bottom-left {
+    bottom: 0;
   }
 
   .day .when {
