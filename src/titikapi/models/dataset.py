@@ -29,6 +29,8 @@ WEATHER_VARS = (
     "ffmc", "dmc", "dc", "isi", "bui", "fwi",
 )  # fmt: skip
 STATIC_VARS = ("peat_frac", "elev_mean", "elev_std", "treecover2000")
+# heavy right tails: log1p before standardising
+LOG_WEATHER = ("pr", "rain_7d", "rain_30d", "rain_60d", "rain_90d", "dmc", "dc", "bui", "fwi")
 DAYS_SINCE_CAP = 255
 
 
@@ -98,8 +100,8 @@ def build_arrays(cube_dir: Path = CUBE_DIR, out: Path = ARRAYS_DIR) -> None:
     wx = np.zeros((len(time), len(WEATHER_VARS), w.sizes["lat"], w.sizes["lon"]), np.float16)
     for k, v in enumerate(WEATHER_VARS):
         a = w[v].values.astype(np.float32)
-        if v in ("pr", "rain_7d", "rain_30d", "rain_60d", "rain_90d", "dmc", "dc", "bui", "fwi"):
-            a = np.log1p(np.maximum(a, 0))  # heavy right tails
+        if v in LOG_WEATHER:
+            a = np.log1p(np.maximum(a, 0))
         mu, sd = float(a[train].mean()), float(a[train].std() + 1e-6)
         stats[v] = (mu, sd)
         wx[:, k] = (a - mu) / sd
@@ -107,6 +109,19 @@ def build_arrays(cube_dir: Path = CUBE_DIR, out: Path = ARRAYS_DIR) -> None:
     np.save(out / "weather_lat.npy", w["lat"].values.astype(np.float32))
     np.save(out / "weather_lon.npy", w["lon"].values.astype(np.float32))
     (out / "stats.json").write_text(json.dumps(stats, indent=1))
+
+
+def standardize_weather(feats, stats: dict) -> np.ndarray:
+    """(T, len(WEATHER_VARS), lat, lon) float16 model inputs from weather features (a Dataset or
+    mapping of (T, lat, lon) arrays), using the training statistics saved by build_arrays."""
+    out = []
+    for v in WEATHER_VARS:
+        a = np.asarray(feats[v], np.float32)
+        if v in LOG_WEATHER:
+            a = np.log1p(np.maximum(a, 0))
+        mu, sd = stats[v]
+        out.append((a - mu) / sd)
+    return np.stack(out, axis=1).astype(np.float16)
 
 
 @dataclass

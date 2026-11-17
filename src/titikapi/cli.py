@@ -297,6 +297,53 @@ def explain(args: argparse.Namespace) -> None:
     print(f"wrote {out}")
 
 
+def live_bootstrap(args: argparse.Namespace) -> None:
+    import datetime as dt
+
+    from titikapi.live import daily
+
+    daily.bootstrap(dt.date.fromisoformat(args.weather_through), push_bundle=args.push)
+
+
+def live_daily(args: argparse.Namespace) -> None:
+    import datetime as dt
+
+    from titikapi.live import daily
+
+    issue = dt.date.fromisoformat(args.date) if args.date else dt.datetime.now(dt.UTC).date()
+    if not args.local:
+        daily.pull()
+    daily.run(issue)
+    if not args.local:
+        daily.push(issue)
+
+
+def live_replay(args: argparse.Namespace) -> None:
+    """Backtest the deployed pipeline (NOAA-20 + IFS) over a past period."""
+    import pandas as pd
+
+    from titikapi.config import ROOT
+    from titikapi.live import daily, replay
+    from titikapi.live.bundle import Bundle
+    from titikapi.live.state import FireState
+
+    state = daily.WORK / "live" / "state" / "fire.npz"
+    live_fire = FireState.load(state) if state.exists() else None
+    scores, rel = replay.run(
+        args.start, args.end, Bundle(daily.WORK / "bundle"), daily.WORK, live_fire
+    )
+    scores.to_csv(ROOT / "reports" / "replay.csv", index=False)
+    rel.to_csv(ROOT / "reports" / "replay_reliability.csv", index=False)
+    show = scores[scores.lead.isin([1, 7])]
+    with pd.option_context("display.width", 160):
+        print(
+            show.pivot_table(
+                index="scenario", columns="lead", values=["ap", "new_ap", "top5", "brier"]
+            ).round(4)
+        )
+        print(rel.round(4).to_string(index=False))
+
+
 def _calibrate_and_report(name: str, a, splits, predict) -> None:
     """Fit per-lead Platt scaling on validation logits, then score each split against the
     baselines. Saves probs/idx to models/<name>/ and reports/<name>_<split>.csv."""
@@ -373,6 +420,21 @@ def main() -> None:
     p.add_argument("--members", nargs="+", required=True, help="model names under models/")
     p.add_argument("--splits", nargs="+", default=["val", "test"])
     p.set_defaults(func=evaluate_ensemble)
+
+    p = sub.add_parser("live-bootstrap", help="one-time: bundle + ERA5 weather state for live use")
+    p.add_argument("--weather-through", default="2026-10-31", help="last ERA5 day on disk")
+    p.add_argument("--push", action="store_true", help="publish bundle + state to Hugging Face")
+    p.set_defaults(func=live_bootstrap)
+
+    p = sub.add_parser("live-daily", help="daily forecast: pull state, update, forecast, publish")
+    p.add_argument("--date", help="issue date YYYY-MM-DD (default: today, UTC)")
+    p.add_argument("--local", action="store_true", help="use data/live as is; no Hugging Face")
+    p.set_defaults(func=live_daily)
+
+    p = sub.add_parser("live-replay", help="backtest the deployed pipeline over a past period")
+    p.add_argument("--start", default="2026-08-01")
+    p.add_argument("--end", default="2026-10-24")
+    p.set_defaults(func=live_replay)
 
     p = sub.add_parser("sensor-transfer", help="S-NPP vs NOAA-20 agreement and model transfer")
     p.add_argument("--unet", default="unet_reg")

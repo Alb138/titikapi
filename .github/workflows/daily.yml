@@ -1,0 +1,32 @@
+name: Daily forecast
+
+on:
+  schedule:
+    - cron: "0 12 * * *" # 19:00 WIB: after NOAA-20's afternoon overpass reaches NASA FIRMS
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Issue date YYYY-MM-DD (default: today, UTC)"
+        required: false
+
+concurrency:
+  group: daily-forecast
+  cancel-in-progress: false
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install (CPU PyTorch on Linux)
+        run: uv sync --frozen --no-dev
+      - name: Forecast, score, publish to Hugging Face
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          FIRMS_MAP_KEY: ${{ secrets.FIRMS_MAP_KEY }}
+          DATE: ${{ inputs.date }}
+        run: uv run --no-sync titikapi live-daily ${DATE:+--date "$DATE"}

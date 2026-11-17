@@ -148,8 +148,11 @@ def api_availability(key: str) -> pd.DataFrame:
     return pd.read_csv(io.StringIO(r.text), parse_dates=["min_date", "max_date"])
 
 
-def download_api(source: str, start, end, grid: Grid, dest_dir: Path = API_DIR) -> pd.DataFrame:
-    """Detections for [start, end] from the area API, cached as one CSV per 5-day request."""
+def download_api(
+    source: str, start, end, grid: Grid, dest_dir: Path = API_DIR, use_cache: bool = True
+) -> pd.DataFrame:
+    """Detections for [start, end] (UTC dates) from the area API, cached as one CSV per 5-day
+    request. Pass use_cache=False for recent near-real-time days, which keep receiving data."""
     key = map_key()
     r = grid.region
     bbox = f"{r.lon_min},{r.lat_min},{r.lon_max},{r.lat_max}"
@@ -159,7 +162,7 @@ def download_api(source: str, start, end, grid: Grid, dest_dir: Path = API_DIR) 
     while day <= end:
         n = min(API_MAX_DAYS, (end - day).days + 1)
         path = dest_dir / f"{source}_{day.date()}_{n}d.csv"
-        if not path.exists():
+        if not (use_cache and path.exists()):
             resp = requests.get(
                 f"{API_URL}/area/csv/{key}/{source}/{bbox}/{n}/{day.date()}", timeout=300
             )

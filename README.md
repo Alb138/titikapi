@@ -38,21 +38,51 @@ satellites carrying the same instrument ~50 minutes apart agree on only 27–52%
 
 ### What the experiments showed
 
-1. **Large, consistent gains over the baselines**: ~40% higher PR-AUC than persistence at both
+1. **Validated as deployed**: replaying the 2026 fire season with the live inputs (NOAA-20 fires,
+   real-time ECMWF weather) gives the same skill as the test (see below).
+2. **Large, consistent gains over the baselines**: ~40% higher PR-AUC than persistence at both
    day 1 and day 7 over the test period, and ahead of persistence in every test year.
-2. **Deep learning earns its place at longer leads and on new fires, not at day 1.** LightGBM with
+3. **Deep learning earns its place at longer leads and on new fires, not at day 1.** LightGBM with
    hand-built neighbourhood features ties the U-Net next-day; from day 2 on the U-Net is ahead, and
    it is the only model that beats climatology on new fires at every lead (LightGBM falls below
    it from day 3). Averaging the two gives the best overall model.
-3. **Overfitting fixed, ceiling unchanged.** Random-crop augmentation and stronger regularisation
+4. **Overfitting fixed, ceiling unchanged.** Random-crop augmentation and stronger regularisation
    stopped the U-Net from overfitting after 5 epochs, but did not raise its best score, and a 4×
    smaller U-Net scores the same. The limit is the information in the inputs, not model size.
-4. **New fires a week ahead are only marginally predictable** from weather and fire history
+5. **New fires a week ahead are only marginally predictable** from weather and fire history
    (U-Net 14.3% vs climatology 13.9%). Most are set by people clearing land.
-5. **The probabilities are calibrated** (recalibrated on the validation years), with slight
+6. **The probabilities are calibrated** (recalibrated on the validation years), with slight
    under-forecasting at low probabilities in the fire-heavy test years.
 
 ![New fires by lead day](docs/figures/res_new_fires_by_lead.png)
+
+### What drives the forecasts
+
+Group permutation importance (`titikapi explain`): scramble one input group and measure the drop in
+PR-AUC. Recent fire history dominates day 1 for both models. **At day 7 the U-Net relies on
+rainfall memory** (scrambling it costs a quarter of its day-7 score), while LightGBM barely uses
+rain and leans on the fire climatology instead. The deep model has learned the physical signal
+behind its edge at longer leads: weeks without rain make land burnable.
+
+![Which inputs each model relies on](docs/figures/res_importance.png)
+
+### Validated as deployed
+
+Live forecasts run on different inputs from the test: **NOAA-20** fire detections and **ECMWF IFS**
+real-time weather instead of ERA5 reanalysis. `titikapi live-replay` replays the deployed code day by
+day through the 2026 El Niño fire season (1 Aug – 24 Oct, 85 forecasts) using only those inputs:
+
+| Same 85 issue days | PR-AUC day 1 | PR-AUC day 7 | Riskiest 5% catches (day 1 / 7) |
+|---|---|---|---|
+| As tested: S-NPP fires + ERA5 weather | 0.561 | 0.422 | 40% / 33% |
+| **As deployed: NOAA-20 + ECMWF IFS** | **0.573** | **0.428** | **40% / 33%** |
+| Persistence (NOAA-20) | 0.473 | 0.361 | 35% / 28% |
+
+Real-time weather costs nothing measurable. One honest finding: about 8% of land cells burned per
+day in that season, far more than in the wet 2021–22 years used for calibration, so **probabilities
+were conservative** (forecasts averaging 50% verified 60% of the time at day 1). The ranking was
+unaffected. Following the project's rule of no tuning on test data, this is reported rather than
+patched. The live scorecard tracks calibration so a season-aware fix can be judged on new data.
 
 ### The satellite retired mid-project
 
@@ -81,8 +111,12 @@ calibration).
 ## Limitations
 
 * **Imperfect labels:** VIIRS misses fires under cloud and between overpasses.
-* **August–October 2026** use near-real-time S-NPP data, which has no fire-type flag. Detections
-  at locations the science-quality record flags as gas flares or volcanoes were removed.
+* **Conservative probabilities in extreme seasons:** calibration comes from wet 2021–22; ranking
+  is unaffected (see *Validated as deployed*).
+* **Near-real-time fire data has no fire-type flag** (Aug–Oct 2026 S-NPP labels; all live NOAA-20
+  inputs). Detections at locations the science-quality record flags as gas flares, volcanoes or
+  offshore platforms are removed. On held-out 2025 data that filter catches 97% of those and
+  wrongly drops 3% of vegetation fires.
 * **No weather forecasts yet:** inputs stop at the issue day. Adding forecast weather for days
   1–7 is the obvious next experiment.
 * **Human ignitions** (land clearing) are not observed by any input.
@@ -102,6 +136,10 @@ uv run titikapi train-lgbm
 uv run titikapi evaluate-ensemble --name ens_unet --members unet_reg unet_crop unet_crop16
 uv run titikapi evaluate-ensemble --name ens_mix --members ens_unet lgbm
 uv run titikapi sensor-transfer                   # S-NPP vs NOAA-20
+uv run titikapi explain                           # group permutation importance
+uv run titikapi live-bootstrap                    # model bundle + ERA5-seeded weather state
+uv run titikapi live-replay                       # backtest the deployed pipeline
+uv run titikapi live-daily --local                # one daily forecast (the GitHub Action runs this)
 uv run pytest
 ```
 
