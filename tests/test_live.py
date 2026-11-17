@@ -81,6 +81,5 @@ def test_score_archive_accepts_an_empty_scores_file(tmp_path):
     fire = _fire(20)
     (tmp_path / "forecasts").mkdir()
     csv = tmp_path / "scores.csv"
-    csv.write_text("
-")  # what an empty DataFrame's to_csv leaves behind
+    pd.DataFrame().to_csv(csv, index=False)  # what the first runs leave behind
     assert score_archive(tmp_path / "forecasts", fire, csv).empty
