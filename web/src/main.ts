@@ -117,7 +117,7 @@ function addForecastLayers(f: Forecast, observed: FeatureCollection) {
     const n = Number(p.detections);
     popup
       .setLngLat(e.lngLat)
-      .setHTML(`Fire detected ${dayLong(p.date)}<br>${n} detection${n === 1 ? "" : "s"}, ${p.province}`)
+      .setHTML(`Hotspot seen ${dayLong(p.date)}<br>${n} detection${n === 1 ? "" : "s"}, ${p.province}`)
       .addTo(map);
   });
   map.on("mouseleave", "fires", () => {
@@ -138,7 +138,7 @@ function renderDay(f: Forecast, lead: number) {
     `from fires and weather up to that day.`;
   $("expected").innerHTML =
     `About <strong>${fmtCells(L.expected_fire_cells)}</strong> of the region's 9,275 land cells ` +
-    `are expected to have a fire.`;
+    `are expected to have a satellite hotspot.`;
 
   const list = $("provinces");
   const max = Math.max(...L.provinces.map((p) => p.expected_fire_cells), 1e-9);
@@ -171,7 +171,7 @@ function buildStrip(f: Forecast, onPick: (lead: number) => void) {
       b.className = "day";
       b.dataset.lead = String(L.lead);
       b.setAttribute("aria-pressed", "false");
-      b.setAttribute("aria-label", `${dayLong(L.date)}: about ${fmtCells(L.expected_fire_cells)} fire cells expected`);
+      b.setAttribute("aria-label", `${dayLong(L.date)}: about ${fmtCells(L.expected_fire_cells)} hotspot cells expected`);
       b.style.setProperty("--h", `${Math.max(4, (54 * L.expected_fire_cells) / max)}px`);
       b.innerHTML =
         `<span class="col" aria-hidden="true"></span>` +
@@ -223,7 +223,7 @@ function renderLive(s: Scorecard | null) {
   }
   box.innerHTML =
     `<p class="measure-note">Since ${dayLong(s.first_issue_date ?? "")}: ${lead1.days} days graded, ` +
-    `${lead1.fires.toLocaleString("en-GB")} fire cells. Share of next-day fires in the riskiest 5%:</p>` +
+    `${lead1.fires.toLocaleString("en-GB")} hotspot cells. Share of next-day hotspots in the riskiest 5%:</p>` +
     `<dl class="compare">` +
     `<dt>TitikApi</dt><div class="track ours" aria-hidden="true"><span style="width:${lead1.final_top5 * 100}%"></span></div><dd>${pct(lead1.final_top5)}</dd>` +
     `<dt>Assume today's fires continue</dt><div class="track" aria-hidden="true"><span style="width:${lead1.persistence_top5 * 100}%"></span></div><dd>${pct(lead1.persistence_top5)}</dd>` +

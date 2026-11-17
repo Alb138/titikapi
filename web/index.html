@@ -43,7 +43,7 @@
           <p class="expected" id="expected"></p>
 
           <div class="legend" aria-label="Colour key">
-            <p class="legend-title">Chance of a fire in each 11 km cell</p>
+            <p class="legend-title">Chance of a satellite hotspot in each 11 km cell</p>
             <div class="legend-ramp" aria-hidden="true"></div>
             <div class="legend-ticks" aria-hidden="true">
               <span style="left: 0%">0.1%</span>
@@ -56,10 +56,10 @@
           <label class="toggle">
             <input type="checkbox" id="show-fires" checked />
             <span class="fire-dot" aria-hidden="true"></span>
-            Fires detected in the last 3 days
+            Hotspots seen by satellite in the last 3 days
           </label>
 
-          <h2 class="provinces-title">Expected fire cells by province</h2>
+          <h2 class="provinces-title">Expected hotspot cells by province</h2>
           <ol class="provinces" id="provinces"></ol>
           <button class="link-button" id="more-provinces" type="button" hidden>
             Show all 15 provinces
@@ -73,7 +73,7 @@
         <div class="prose">
           <h2 id="accuracy-title">How accurate is it?</h2>
           <p>
-            A probability can't be judged on one day: a 30% chance that doesn't burn wasn't wrong.
+            The forecast is for satellite hotspots: places the satellite sees as much hotter than their surroundings. They are almost always fires, but not confirmed on the ground. A probability can't be judged on one day: a 30% chance that doesn't burn wasn't wrong.
             Accuracy shows over many forecasts, measured three ways: are the riskiest cells really
             where fires happen, do the percentages match how often fires follow, and is it better
             than the obvious alternative of assuming today's fires continue.
@@ -85,7 +85,7 @@
             <h3>Tested before launch</h3>
             <p class="measure-note">
               January 2023 to October 2026, years the model never saw while it was trained or
-              tuned. Share of next-day fires that fell in the 5% of cells the forecast ranked
+              tuned. Share of next-day hotspots that fell in the 5% of cells the forecast ranked
               riskiest:
             </p>
             <dl class="compare" id="tested"></dl>
@@ -107,8 +107,8 @@
           <h2 id="about-title">About</h2>
           <p>
             <em>Titik api</em> is Indonesian for hotspot. Every evening at 19:00 WIB, TitikApi takes
-            the fires seen by NASA's NOAA-20 satellite and the latest ECMWF weather, and forecasts
-            the chance of a fire in every 11 km cell of Sumatra and Kalimantan for each of the next
+            the hotspots seen by NASA's NOAA-20 satellite and the latest ECMWF weather, and forecasts
+            the chance of a satellite hotspot (an active fire seen from space) in every 11 km cell of Sumatra and Kalimantan for each of the next
             7 days. The forecast combines a deep-learning model (a U-Net, which reads the whole map
             at once) with a gradient-boosted model, both trained on fires from 2012 to 2020.
           </p>
