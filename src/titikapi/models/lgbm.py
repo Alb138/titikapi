@@ -61,14 +61,18 @@ class FeatureBuilder:
         grid = Grid()
         self.sg = weather_sampling_grid(a.weather_lat, a.weather_lon, grid.lats, grid.lons)
 
-    def weather(self, t: int) -> np.ndarray:
-        """(Cw, ny, nx): weather bilinearly resampled to the grid, exactly as the U-Net sees it."""
-        w = torch.from_numpy(np.asarray(self.a.weather[t], np.float32))[None]
+    def weather(self, w: np.ndarray) -> np.ndarray:
+        """(Cw, ny, nx): native weather (Cw, h, w) bilinearly resampled to the grid, exactly as
+        the U-Net sees it."""
+        w = torch.from_numpy(np.asarray(w, np.float32))[None]
         return F.grid_sample(w, self.sg, mode="bilinear", align_corners=True)[0].numpy()
 
     def day(self, t: int) -> np.ndarray:
         """(N land cells, len(FEATURES)) float32 for issue day t (data up to day t only)."""
-        g = grid_inputs(self.a, t)
+        return self.from_inputs(grid_inputs(self.a, t), self.a.weather[t])
+
+    def from_inputs(self, g: np.ndarray, w: np.ndarray) -> np.ndarray:
+        """Features from the U-Net's own inputs: grid channels `g` and native weather `w`."""
         fire = g[:H]  # today first
         week = fire[:7].sum(0)
         cols = [fire[0], fire[1], fire[2], fire[:3].sum(0), week, fire.sum(0)]
@@ -77,7 +81,7 @@ class FeatureBuilder:
         cols += [_box_sum(fire[0], s) for s in NEIGHBOURHOODS]
         cols += [_box_sum(week, s) for s in NEIGHBOURHOODS]
         cols.append(_box_sum(g[H + 1], 5))
-        cols += list(self.weather(t))
+        cols += list(self.weather(w))
         assert len(cols) == len(FEATURES)
         m = self.a.mask
         return np.stack([c[m] for c in cols], axis=1).astype(np.float32)

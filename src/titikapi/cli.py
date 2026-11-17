@@ -222,6 +222,81 @@ def evaluate_ensemble(args: argparse.Namespace) -> None:
     _calibrate_and_report(args.name, Arrays.load(ARRAYS_DIR), args.splits, predict)
 
 
+def _predictors(a, unet_name: str, lgbm_name: str) -> dict:
+    """Score functions f(x, w) -> (D, 7, N) for a trained U-Net and LightGBM run, on CPU."""
+    import json
+
+    import lightgbm as lgb
+    import torch
+
+    from titikapi.config import LEAD_DAYS
+    from titikapi.models import lgbm
+    from titikapi.models.explain import lgbm_scores, unet_scores
+    from titikapi.models.train import MODELS_DIR, TrainConfig, build_model
+
+    run = MODELS_DIR / unet_name
+    cfg = TrainConfig(**json.loads((run / "config.json").read_text()))
+    model = build_model(a, cfg)
+    model.load_state_dict(torch.load(run / "best.pt", weights_only=True, map_location="cpu"))
+    model.eval()
+    boosters = [
+        lgb.Booster(model_file=str(MODELS_DIR / lgbm_name / f"lead{d}.txt"))
+        for d in range(1, LEAD_DAYS + 1)
+    ]
+    fb = lgbm.FeatureBuilder(a)
+    mask = np.array(a.mask)  # writable copy for torch
+    return {
+        "U-Net": lambda x, w: unet_scores(model, x, w, mask),
+        "LightGBM": lambda x, w: lgbm_scores(boosters, fb, x, w),
+    }
+
+
+def sensor_transfer(args: argparse.Namespace) -> None:
+    """S-NPP vs NOAA-20: detection agreement and model skill with NOAA-20 in and out."""
+    import pandas as pd
+
+    from titikapi.config import ROOT
+    from titikapi.models import transfer
+    from titikapi.models.dataset import ARRAYS_DIR, Arrays
+
+    a = Arrays.load(ARRAYS_DIR)
+    years = range(args.start_year, args.end_year + 1)
+    n20 = transfer.sensor_arrays(a, years)
+    in_years = np.flatnonzero((a.time.year >= years[0]) & (a.time.year <= years[-1]))
+    agree = transfer.agreement(a, n20, in_years)
+    agree.to_csv(ROOT / "reports" / "sensor_agreement.csv", index=False)
+    print(agree.round(3).to_string(index=False), flush=True)
+
+    idx = _issue_days("test")
+    idx = idx[a.time[idx + 7].year <= years[-1]][:: args.stride]
+    print(f"scoring {len(idx)} test issue days (every {args.stride}th)", flush=True)
+    df = transfer.transfer_scores(a, n20, idx, _predictors(a, args.unet, args.lgbm))
+    df.to_csv(ROOT / "reports" / "sensor_transfer.csv", index=False)
+    with pd.option_context("display.width", 160):
+        print(
+            df.pivot_table(
+                index=["model", "scenario"], columns="lead", values=["ap", "new_ap"]
+            ).round(4)
+        )
+
+
+def explain(args: argparse.Namespace) -> None:
+    """Group permutation importance, U-Net vs LightGBM -> reports/importance_groups.csv"""
+    from titikapi.config import ROOT
+    from titikapi.models.dataset import ARRAYS_DIR, Arrays
+    from titikapi.models.explain import permutation_importance
+
+    a = Arrays.load(ARRAYS_DIR)
+    idx = _issue_days(args.split)[:: args.stride]
+    print(f"{len(idx)} {args.split} issue days, every {args.stride}th", flush=True)
+    predictors = _predictors(a, args.unet, args.lgbm)
+    df = permutation_importance(a, idx, predictors, repeats=args.repeats)
+    df.insert(0, "split", args.split)
+    out = ROOT / "reports" / args.out
+    df.to_csv(out, index=False)
+    print(f"wrote {out}")
+
+
 def _calibrate_and_report(name: str, a, splits, predict) -> None:
     """Fit per-lead Platt scaling on validation logits, then score each split against the
     baselines. Saves probs/idx to models/<name>/ and reports/<name>_<split>.csv."""
@@ -298,6 +373,23 @@ def main() -> None:
     p.add_argument("--members", nargs="+", required=True, help="model names under models/")
     p.add_argument("--splits", nargs="+", default=["val", "test"])
     p.set_defaults(func=evaluate_ensemble)
+
+    p = sub.add_parser("sensor-transfer", help="S-NPP vs NOAA-20 agreement and model transfer")
+    p.add_argument("--unet", default="unet_reg")
+    p.add_argument("--lgbm", default="lgbm")
+    p.add_argument("--start-year", type=int, default=2019)
+    p.add_argument("--end-year", type=int, default=2025)
+    p.add_argument("--stride", type=int, default=4)
+    p.set_defaults(func=sensor_transfer)
+
+    p = sub.add_parser("explain", help="group permutation importance (U-Net vs LightGBM)")
+    p.add_argument("--unet", default="unet_reg")
+    p.add_argument("--lgbm", default="lgbm")
+    p.add_argument("--split", default="test")
+    p.add_argument("--stride", type=int, default=4, help="use every n-th issue day")
+    p.add_argument("--repeats", type=int, default=2)
+    p.add_argument("--out", default="importance_groups.csv")
+    p.set_defaults(func=explain)
 
     p = sub.add_parser("train-lgbm", help="LightGBM baseline: fit, calibrate, score")
     p.add_argument("--name", default="lgbm")
