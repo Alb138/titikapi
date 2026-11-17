@@ -8,8 +8,7 @@ Indonesia's peatland fires cause regional haze crises in El Niño years (2015, 2
 again in 2026). Fire agencies patrol with limited people. The question this project answers is
 practical: **if patrols could cover only 5% of the region each day, where should they go?**
 
-> **Status:** model trained and evaluated on 2023 – October 2026 (including the 2026 El Niño
-> season). A daily live forecast map (GitHub Actions + Hugging Face + Vercel) is in progress.
+> **Live:** [titikapi.vercel.app](https://titikapi.vercel.app) shows today's forecast map, updated every day at 19:00 WIB by a GitHub Action. Forecasts, scores and models are public on Hugging Face ([forecasts](https://huggingface.co/datasets/Alb138/titikapi-live), [models](https://huggingface.co/Alb138/titikapi-model)).
 
 ![Forecast issued 14 September 2026 vs fires observed](docs/figures/res_example_2026-09-14.png)
 
